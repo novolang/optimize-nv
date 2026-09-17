@@ -1,0 +1,118 @@
+// optquasi_tests.nv — BFGS, and the gradient it is either given or has
+// to difference.
+//
+// RED ON PURPOSE: every assertion reaches `not implemented:
+// optimize-nv.optquasi.<fn>`.
+//
+// The oracles are the sphere function, whose gradient is 2x and whose
+// minimum is 0 at the origin, and Rosenbrock's function, whose
+// gradient is the standard one every textbook prints.
+
+use std.test
+use optquasi
+use optstop
+
+fn sphere(x: [Float]) -> Float
+    x[0] * x[0] + x[1] * x[1]
+
+fn sphere_grad(x: [Float]) -> [Float]
+    [2.0 * x[0], 2.0 * x[1]]
+
+fn wrong_length_grad(x: [Float]) -> [Float]
+    [2.0 * x[0]]
+
+@test
+fn test_the_classic_wolfe_constants() [io]
+    test.case("a floor on the decrease and a ceiling on the curvature")
+    let s = optquasi.classic_line_search()
+    test.assert(s.decrease == 0.0001)
+    test.assert(s.curvature == 0.9)
+    test.assert(s.max_steps > 0)
+
+@test
+fn test_bfgs_with_an_analytic_gradient_reaches_the_minimum_in_a_few_steps() [io]
+    // On a quadratic the BFGS approximation is exact after n steps,
+    // which is the claim the iteration count here checks.
+    let rule = optstop.with_gradient_tolerance(optstop.budgeted(200), 0.000001)
+    let how = optstop.analytic_gradient()
+
+    test.case("the origin, converged")
+    match optquasi.bfgs(sphere, sphere_grad, [1.0, 1.0], how, optquasi.classic_line_search(), rule)
+        Err(e) => test.fail(e.message())
+        Ok(r)  =>
+            test.assert_approx(r.value, 0.0, 0.0000001)
+            test.assert(optstop.converged(r))
+
+    test.case("and it took few iterations, because the problem is a quadratic")
+    match optquasi.bfgs(sphere, sphere_grad, [1.0, 1.0], how, optquasi.classic_line_search(), rule)
+        Err(e) => test.fail(e.message())
+        Ok(r)  => test.assert(r.iterations < 10)
+
+    test.case("the gradient calls are counted apart from the function calls")
+    match optquasi.bfgs(sphere, sphere_grad, [1.0, 1.0], how, optquasi.classic_line_search(), rule)
+        Err(e) => test.fail(e.message())
+        Ok(r)  => test.assert(r.gradient_evaluations > 0)
+
+@test
+fn test_a_supplied_gradient_of_the_wrong_length_is_refused() [io]
+    // The failure a library that does not check this produces is a
+    // wrong answer rather than an error, which is why it is checked.
+    let rule = optstop.budgeted(50)
+    test.case("one component for a two-dimensional point")
+    match optquasi.bfgs(sphere,
+        wrong_length_grad,
+        [1.0, 1.0],
+        optstop.analytic_gradient(),
+        optquasi.classic_line_search(),
+        rule)
+        Ok(_)  => test.fail("a gradient has one component per coordinate")
+        Err(_) => test.assert(true)
+
+@test
+fn test_bfgs_numeric_needs_no_gradient_function_at_all() [io]
+    let rule = optstop.with_value_tolerance(optstop.budgeted(200), 0.000000001)
+
+    test.case("the same minimum, differenced over the objective")
+    match optquasi.bfgs_numeric(sphere, [1.0, 1.0], optstop.central_difference(0.000001), rule)
+        Err(e) => test.fail(e.message())
+        Ok(r)  => test.assert_approx(r.value, 0.0, 0.000001)
+
+    test.case("and the differencing shows up in the gradient evaluation count")
+    match optquasi.bfgs_numeric(sphere, [1.0, 1.0], optstop.central_difference(0.000001), rule)
+        Err(e) => test.fail(e.message())
+        Ok(r)  => test.assert(r.gradient_evaluations > 0)
+
+@test
+fn test_the_numeric_gradient_is_worth_having_on_its_own() [io]
+    // Checking an analytic gradient against a differenced one at a few
+    // points is how a wrong derivative gets found, and it is worth
+    // more than most unit tests of an objective.
+    test.case("the gradient of the sphere at (1, 2) is (2, 4)")
+    match optquasi.numeric_gradient(sphere, [1.0, 2.0], optstop.central_difference(0.000001))
+        Err(e) => test.fail(e.message())
+        Ok(g)  =>
+            test.assert_approx(g[0], 2.0, 0.00001)
+            test.assert_approx(g[1], 4.0, 0.00001)
+
+    test.case("a forward difference agrees to its own, looser accuracy")
+    match optquasi.numeric_gradient(sphere, [1.0, 2.0], optstop.forward_difference(0.000001))
+        Err(e) => test.fail(e.message())
+        Ok(g)  => test.assert_approx(g[0], 2.0, 0.001)
+
+    test.case("and it matches the analytic gradient, which is the check itself")
+    match optquasi.numeric_gradient(sphere, [3.0, -1.0], optstop.central_difference(0.000001))
+        Err(e) => test.fail(e.message())
+        Ok(g)  => test.assert_approx(g[0], sphere_grad([3.0, -1.0])[0], 0.00001)
+
+@test
+fn test_the_gradient_norm_is_the_largest_component_and_not_the_length() [io]
+    // A tolerance on the largest component is a statement about each
+    // coordinate and does not get looser as the dimension grows.
+    test.case("the infinity norm")
+    test.assert_approx(optquasi.gradient_norm([0.3, -0.7, 0.1]), 0.7, 0.0000001)
+
+    test.case("a zero gradient has a zero norm")
+    test.assert_approx(optquasi.gradient_norm([0.0, 0.0]), 0.0, 0.0000001)
+
+    test.case("and the sign does not matter")
+    test.assert_approx(optquasi.gradient_norm([-5.0, 1.0]), 5.0, 0.0000001)

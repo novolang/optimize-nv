@@ -1,0 +1,135 @@
+// optsimplex_tests.nv — Nelder-Mead, and the simplex the caller owns.
+//
+// RED ON PURPOSE: every assertion reaches `not implemented:
+// optimize-nv.optsimplex.<fn>`.
+//
+// The oracles are the two functions every optimisation suite is
+// checked against.  The sphere function has its minimum 0 at the
+// origin.  Rosenbrock's function, (1 - x)^2 + 100(y - x^2)^2, has its
+// minimum 0 at (1, 1) at the bottom of a curved valley, and it is
+// there to catch a method that mistakes the valley floor for the
+// minimum.
+
+use std.test
+use optsimplex
+use optstop
+
+fn sphere(x: [Float]) -> Float
+    x[0] * x[0] + x[1] * x[1]
+
+fn rosenbrock(x: [Float]) -> Float
+    let a = 1.0 - x[0]
+    let b = x[1] - x[0] * x[0]
+    a * a + 100.0 * b * b
+
+@test
+fn test_the_classic_coefficients_are_one_two_and_two_halves() [io]
+    test.case("reflection, expansion, contraction, shrink")
+    let m = optsimplex.classic_moves()
+    test.assert(m.reflection == 1.0)
+    test.assert(m.expansion == 2.0)
+    test.assert(m.contraction == 0.5)
+    test.assert(m.shrink == 0.5)
+
+@test
+fn test_the_initial_simplex_is_deterministic_and_the_callers() [io]
+    // Every other implementation perturbs the starting point, and most
+    // of them do it randomly — which makes the run irreproducible and
+    // is the one thing that would have put this package in `host`.
+    test.case("n + 1 vertices for n coordinates")
+    match optsimplex.simplex_around([0.0, 0.0], 1.0)
+        Err(e) => test.fail(e.message())
+        Ok(s)  =>
+            test.assert(list.len(s) == 3)
+            test.assert(list.len(s[0]) == 2)
+
+    test.case("the first vertex is the point itself")
+    match optsimplex.simplex_around([3.0, 4.0], 1.0)
+        Err(e) => test.fail(e.message())
+        Ok(s)  =>
+            test.assert(s[0][0] == 3.0)
+            test.assert(s[0][1] == 4.0)
+
+    test.case("and two runs give the same simplex, because nothing random happened")
+    match optsimplex.simplex_around([3.0, 4.0], 1.0)
+        Err(e)    => test.fail(e.message())
+        Ok(first) =>
+            match optsimplex.simplex_around([3.0, 4.0], 1.0)
+                Err(e)     => test.fail(e.message())
+                Ok(second) => test.assert(first[1] == second[1])
+
+    test.case("a step of zero makes a degenerate simplex and is refused")
+    match optsimplex.simplex_around([0.0, 0.0], 0.0)
+        Ok(_)  => test.fail("two identical vertices are not a simplex")
+        Err(_) => test.assert(true)
+
+    test.case("an empty start has nothing to vary")
+    match optsimplex.simplex_around([], 1.0)
+        Ok(_)  => test.fail("no coordinates, no simplex")
+        Err(_) => test.assert(true)
+
+@test
+fn test_a_step_per_coordinate_is_the_form_for_mixed_units() [io]
+    // One step for metres and seconds together is a step that is too
+    // large in one and too small in the other.
+    test.case("one step per coordinate")
+    match optsimplex.simplex_with_steps([0.0, 0.0], [1.0, 0.001])
+        Err(e) => test.fail(e.message())
+        Ok(s)  => test.assert(list.len(s) == 3)
+
+    test.case("mismatched lengths are refused")
+    match optsimplex.simplex_with_steps([0.0, 0.0], [1.0])
+        Ok(_)  => test.fail("one step for two coordinates names no simplex")
+        Err(_) => test.assert(true)
+
+@test
+fn test_nelder_mead_finds_the_minimum_of_the_sphere() [io]
+    let rule = optstop.with_point_tolerance(optstop.budgeted(500), 0.00000001)
+
+    test.case("from (1, 1), the origin")
+    match optsimplex.simplex_around([1.0, 1.0], 0.5)
+        Err(e) => test.fail(e.message())
+        Ok(s)  =>
+            match optsimplex.nelder_mead(sphere, s, optsimplex.classic_moves(), rule)
+                Err(e) => test.fail(e.message())
+                Ok(r)  =>
+                    test.assert_approx(r.value, 0.0, 0.000001)
+                    test.assert_approx(r.point[0], 0.0, 0.0001)
+                    test.assert_approx(r.point[1], 0.0, 0.0001)
+                    test.assert(optstop.converged(r))
+
+@test
+fn test_nelder_mead_gets_down_the_rosenbrock_valley() [io]
+    // The function that catches a method which mistakes the valley
+    // floor for the minimum.  Nelder-Mead gets there, slowly, which is
+    // why the budget here is large.
+    let rule = optstop.with_point_tolerance(optstop.budgeted(2000), 0.0000000001)
+
+    test.case("the minimum is 0 at (1, 1)")
+    match optsimplex.simplex_around([-1.2, 1.0], 0.5)
+        Err(e) => test.fail(e.message())
+        Ok(s)  =>
+            match optsimplex.nelder_mead(rosenbrock, s, optsimplex.classic_moves(), rule)
+                Err(e) => test.fail(e.message())
+                Ok(r)  =>
+                    test.assert_approx(r.point[0], 1.0, 0.001)
+                    test.assert_approx(r.point[1], 1.0, 0.001)
+
+@test
+fn test_a_simplex_of_the_wrong_size_is_refused_with_both_counts() [io]
+    let rule = optstop.budgeted(100)
+
+    test.case("two vertices for a two-dimensional problem is one short")
+    match optsimplex.nelder_mead(sphere, [[0.0, 0.0], [1.0, 0.0]], optsimplex.classic_moves(), rule)
+        Ok(_)  => test.fail("a two-dimensional simplex has three vertices")
+        Err(_) => test.assert(true)
+
+@test
+fn test_simplex_size_is_the_quantity_the_point_tolerance_tests() [io]
+    test.case("a unit simplex around the origin measures 1")
+    match optsimplex.simplex_around([0.0, 0.0], 1.0)
+        Err(e) => test.fail(e.message())
+        Ok(s)  => test.assert_approx(optsimplex.simplex_size(s), 1.0, 0.000001)
+
+    test.case("and a collapsed one measures nothing")
+    test.assert_approx(optsimplex.simplex_size([[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]]), 0.0, 0.000001)

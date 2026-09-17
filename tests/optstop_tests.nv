@@ -1,0 +1,123 @@
+// optstop_tests.nv — the stopping rule is a value, and the result says
+// which rule fired.
+//
+// RED ON PURPOSE: every assertion reaches `not implemented:
+// optimize-nv.optstop.<fn>`.  What is asserted is that the default
+// rule terminates, that every narrowing form changes one field, that a
+// rule which could never stop says so where it is built, and that the
+// three status arms are three different things.
+
+use std.test
+use optstop
+
+@test
+fn test_the_default_rule_is_a_budget_and_nothing_else() [io]
+    // The honest starting point: it always terminates, and it
+    // terminates having converged to nothing.  A caller adds the
+    // tolerances its own units justify.
+    test.case("budgeted sets the iteration budget and no tolerance")
+    let rule = optstop.budgeted(1000)
+    test.assert(rule.max_iterations == 1000)
+    test.assert(rule.point_tolerance == 0.0)
+    test.assert(rule.value_tolerance == 0.0)
+    test.assert(rule.gradient_tolerance == 0.0)
+
+    test.case("and it terminates, so check accepts it")
+    test.assert_none(optstop.check(rule))
+
+@test
+fn test_every_narrowing_form_changes_one_field() [io]
+    let base = optstop.budgeted(100)
+
+    test.case("the evaluation budget is separate from the iteration budget")
+    let e = optstop.with_evaluation_budget(base, 5000)
+    test.assert(e.max_evaluations == 5000)
+    test.assert(e.max_iterations == 100)
+
+    test.case("with_point_tolerance")
+    test.assert(optstop.with_point_tolerance(base, 0.001).point_tolerance == 0.001)
+
+    test.case("with_value_tolerance")
+    test.assert(optstop.with_value_tolerance(base, 0.002).value_tolerance == 0.002)
+
+    test.case("with_gradient_tolerance")
+    test.assert(optstop.with_gradient_tolerance(base, 0.003).gradient_tolerance == 0.003)
+
+    test.case("and none of them disturbs the budget")
+    test.assert(optstop.with_gradient_tolerance(base, 0.003).max_iterations == 100)
+
+@test
+fn test_a_rule_that_could_never_stop_says_so_where_it_is_built() [io]
+    // A program that hangs on the one input nobody tried is the
+    // failure this check exists to prevent, and the message names the
+    // field to set.
+    test.case("no budget and no tolerance is not a stopping rule")
+    let never = optstop.budgeted(0)
+    match optstop.check(never)
+        None    => test.fail("a rule with no budget and no tolerance never stops")
+        Some(_) => test.assert(true)
+
+    test.case("a tolerance alone is enough")
+    test.assert_none(optstop.check(optstop.with_point_tolerance(optstop.budgeted(0), 0.0001)))
+
+    test.case("a negative tolerance is a mistake rather than a disabled test")
+    match optstop.check(optstop.with_value_tolerance(optstop.budgeted(100), -1.0))
+        None    => test.fail("a negative tolerance is never met and is not a way to disable one")
+        Some(_) => test.assert(true)
+
+@test
+fn test_the_gradient_option_is_a_value_that_shows_its_step() [io]
+    // A step chosen silently by a library is a step in the wrong units
+    // for somebody's problem, and it is the number that decides
+    // whether a numeric gradient is a gradient or noise.
+    test.case("analytic: the gradient function is called")
+    let a = optstop.analytic_gradient()
+    test.assert(not a.numeric)
+
+    test.case("forward difference: one evaluation per coordinate")
+    let f = optstop.forward_difference(0.000001)
+    test.assert(f.numeric)
+    test.assert(not f.central)
+    test.assert(f.step == 0.000001)
+
+    test.case("central difference: two per coordinate, and the step squared in the error")
+    let c = optstop.central_difference(0.00001)
+    test.assert(c.numeric)
+    test.assert(c.central)
+    test.assert(c.step == 0.00001)
+
+@test
+fn test_the_three_status_arms_are_three_different_answers() [io]
+    // A caller that gets back only a point cannot tell a minimum from
+    // a time-out.  This is the type that stops that.
+    test.case("each arm has its own name")
+    test.assert_eq_str(optstop.status_name(OptConverged), "converged")
+    test.assert_eq_str(optstop.status_name(OptBudgetExhausted), "budget exhausted")
+    test.assert_eq_str(optstop.status_name(OptStalled("line search")), "stalled: line search")
+
+    test.case("converged is true for one arm and false for the other two")
+    let good = OptReport { point: [1.0, 1.0],
+        value: 0.0,
+        status: OptConverged,
+        iterations: 12,
+        evaluations: 40,
+        gradient_evaluations: 12 }
+    let out_of_budget = OptReport { point: [0.5, 0.5],
+        value: 0.5,
+        status: OptBudgetExhausted,
+        iterations: 100,
+        evaluations: 301,
+        gradient_evaluations: 100 }
+    let stuck = OptReport { point: [0.9, 0.9],
+        value: 0.02,
+        status: OptStalled("simplex"),
+        iterations: 44,
+        evaluations: 130,
+        gradient_evaluations: 0 }
+    test.assert(optstop.converged(good))
+    test.assert(not optstop.converged(out_of_budget))
+    test.assert(not optstop.converged(stuck))
+
+    test.case("and the report carries the counts a caller has to report")
+    test.assert(out_of_budget.iterations == 100)
+    test.assert(out_of_budget.evaluations == 301)

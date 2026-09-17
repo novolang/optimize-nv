@@ -1,0 +1,307 @@
+// optstop.nv — when to stop, as one value; and what came back, as
+// another.
+//
+// THE PILE OF OPTIONAL ARGUMENTS IS THE PROBLEM.  Every optimisation
+// library ends up with a call like
+//
+//     minimize(f, x0, xtol=1e-8, ftol=1e-8, gtol=1e-5, maxiter=None,
+//              maxfev=None, disp=False, …)
+//
+// and the consequences are the same every time.  The tolerances are
+// written once at each call site, so the twelfth call in a codebase
+// has drifted from the first and nobody can tell by looking.  The
+// defaults were chosen by someone who did not know the units of the
+// caller's problem.  And `maxiter=None` — run until it converges —
+// means a program that hangs on the one input the author did not try.
+//
+// So the stopping rule here is a VALUE.  A program builds one, names
+// it, and hands the same one to every minimisation it runs, so "when
+// does this program stop optimising" has a definition, a place in the
+// source, and a diff when it changes.
+//
+// EVERY DEFAULT STOPS.  `budgeted(iterations)` sets a budget and no
+// tolerance: it will always terminate, and it will terminate having
+// converged to nothing, which is the honest starting point.  A caller
+// narrows it with the `with_` forms until it means what the problem
+// means.  `check` catches a rule that could never stop — every
+// tolerance zero and no budget — where the rule is built rather than
+// on the run that hangs.
+//
+// AND THE RESULT SAYS WHICH RULE FIRED.  `OptReport` carries the best
+// point, its value, the counts, and an `OptStatus` whose three arms
+// are the three things that can end an iteration: it converged, it
+// used up the budget, or it stopped making progress.  A caller that
+// gets back only a point cannot tell a minimum from a time-out, and
+// that is the single most common way an optimisation result is
+// misread.
+
+// What ended the iteration.
+//
+// Three arms, and the distinction between them is the whole reason
+// this type exists.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     println(optstop.status_name(OptConverged))   // converged
+// ```
+pub enum OptStatus
+    // A tolerance in the stopping rule was met.  The point is a
+    // minimum to the accuracy the rule asked for.
+    OptConverged
+    // The iteration or evaluation budget ran out first.  The point is
+    // the best one found and the iteration can be restarted from it;
+    // it is NOT known to be a minimum.
+    OptBudgetExhausted
+    // The iteration stopped making progress before any tolerance was
+    // met: the simplex collapsed, the line search could not find a
+    // step that decreased the function, or the trust region shrank to
+    // nothing.  Carries what stalled, because the three have
+    // different fixes.
+    OptStalled(what: Str)
+
+// When to stop.
+//
+// Five conditions, any of which ends the run.  A zero tolerance means
+// "do not test this one"; a zero budget means the same.  `check`
+// refuses a rule in which all five are off.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     let rule = optstop.with_value_tolerance(optstop.budgeted(500), 0.000000001)
+//     println("${rule.max_iterations}")   // 500
+// ```
+pub struct OptStop
+    // The largest number of iterations to run.  0 means no limit,
+    // which is only legal when some tolerance is set.
+    max_iterations: Int
+    // The largest number of function evaluations to make.  0 means no
+    // limit.  It is separate from the iteration budget because one
+    // Nelder-Mead iteration costs between one and `n + 2`
+    // evaluations, and when the function is the expensive part this
+    // is the budget that matters.
+    max_evaluations: Int
+    // Stop when the step between successive points is smaller than
+    // this, measured as the largest absolute change in any
+    // coordinate.  0 to disable.
+    point_tolerance: Float
+    // Stop when the decrease in the function value is smaller than
+    // this.  0 to disable.  Meeting this alone is weak evidence of a
+    // minimum on a flat function, which is why it is not the only
+    // test any method uses.
+    value_tolerance: Float
+    // Stop when the largest absolute component of the gradient is
+    // smaller than this.  0 to disable.  Only the gradient-using
+    // methods test it; the others ignore it, and the README says so.
+    gradient_tolerance: Float
+
+// How a gradient is obtained.
+//
+// A VALUE rather than a nullable argument, so that a caller reading a
+// call site can see which of the two it is and, for the numeric case,
+// what step it is differenced over.  A step chosen by the library is
+// a step in the wrong units for somebody's problem.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     println("${optstop.central_difference(0.000001).step}")   // 0.000001
+// ```
+pub struct OptGradient
+    // Whether the gradient is differenced numerically.  When it is
+    // false the caller supplies the gradient function and `step` is
+    // ignored.
+    numeric: Bool
+    // Whether a numeric gradient is a central difference — two
+    // evaluations per coordinate, error proportional to the square of
+    // the step — or a forward difference, which is one evaluation and
+    // an error proportional to the step.
+    central: Bool
+    // The absolute step to difference over.  Ignored when `numeric`
+    // is false.
+    step: Float
+
+// What a run produced.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     println(optstop.status_name(OptBudgetExhausted))   // budget exhausted
+// ```
+pub struct OptReport
+    // The best point found.
+    point: [Float]
+    // The function's value at that point.
+    value: Float
+    // Which rule ended the run.
+    status: OptStatus
+    // How many iterations ran.
+    iterations: Int
+    // How many times the objective was evaluated.  The number to
+    // report when the objective is a simulation and the iteration
+    // count is not what it costs.
+    evaluations: Int
+    // How many times the gradient was evaluated, counting a numeric
+    // gradient's evaluations here rather than in `evaluations`, so
+    // the two costs can be told apart.
+    gradient_evaluations: Int
+
+// A stopping rule that is nothing but a budget.
+//
+// It always terminates, and it terminates having converged to
+// nothing.  That is the honest starting point: a caller adds the
+// tolerances its problem's units justify, rather than inheriting one
+// from a library author who did not know them.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     let rule = optstop.budgeted(1000)
+//     println("${rule.max_iterations} ${rule.point_tolerance}")   // 1000 0
+// ```
+pub fn budgeted(max_iterations: Int) -> OptStop
+    todo("optimize-nv.optstop.budgeted")
+
+// The same rule with an evaluation budget as well.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     println("${optstop.with_evaluation_budget(optstop.budgeted(100), 5000).max_evaluations}")   // 5000
+// ```
+pub fn with_evaluation_budget(rule: OptStop, max_evaluations: Int) -> OptStop
+    todo("optimize-nv.optstop.with_evaluation_budget")
+
+// The same rule, stopping when the step between points gets small.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     println("${optstop.with_point_tolerance(optstop.budgeted(100), 0.00000001).point_tolerance}")
+// ```
+pub fn with_point_tolerance(rule: OptStop, tolerance: Float) -> OptStop
+    todo("optimize-nv.optstop.with_point_tolerance")
+
+// The same rule, stopping when the function stops decreasing.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     println("${optstop.with_value_tolerance(optstop.budgeted(100), 0.00000001).value_tolerance}")
+// ```
+pub fn with_value_tolerance(rule: OptStop, tolerance: Float) -> OptStop
+    todo("optimize-nv.optstop.with_value_tolerance")
+
+// The same rule, stopping when the gradient gets small.
+//
+// Only `optquasi.bfgs` and `optleast.levenberg_marquardt` test it.
+// Setting it on a rule handed to Nelder-Mead or to a one-dimensional
+// method does nothing, and the README says so rather than making the
+// call fail.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     println("${optstop.with_gradient_tolerance(optstop.budgeted(100), 0.00001).gradient_tolerance}")
+// ```
+pub fn with_gradient_tolerance(rule: OptStop, tolerance: Float) -> OptStop
+    todo("optimize-nv.optstop.with_gradient_tolerance")
+
+// Whether this rule could ever stop, and what to set if it could not.
+//
+// A rule with no budget and every tolerance zero is a program that
+// hangs on the first input nobody tried.  Finding it where the rule
+// is built, with the field named, costs nothing; finding it in
+// production costs a restart.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     match optstop.check(optstop.budgeted(1000))
+//         Some(e) => println(e.message())
+//         None    => println("this rule terminates")
+// ```
+pub fn check(rule: OptStop) -> ?OptFault
+    todo("optimize-nv.optstop.check")
+
+// A caller-supplied gradient: the methods will call the gradient
+// function that is passed beside the objective.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     println("${optstop.analytic_gradient().numeric}")   // false
+// ```
+pub fn analytic_gradient() -> OptGradient
+    todo("optimize-nv.optstop.analytic_gradient")
+
+// A forward-difference numeric gradient with this step: one extra
+// evaluation per coordinate, and an error proportional to the step.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     let g = optstop.forward_difference(0.000001)
+//     println("${g.numeric} ${g.central}")   // true false
+// ```
+pub fn forward_difference(step: Float) -> OptGradient
+    todo("optimize-nv.optstop.forward_difference")
+
+// A central-difference numeric gradient with this step: two extra
+// evaluations per coordinate, and an error proportional to the SQUARE
+// of the step.
+//
+// It is the one to use when the objective is cheap and the gradient
+// has to be accurate, which is most of the time; `forward_difference`
+// is for when each evaluation is a simulation.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     let g = optstop.central_difference(0.000001)
+//     println("${g.central}")   // true
+// ```
+pub fn central_difference(step: Float) -> OptGradient
+    todo("optimize-nv.optstop.central_difference")
+
+// The status's name, for a log line and a test: `"converged"`,
+// `"budget exhausted"`, `"stalled: <what>"`.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     println(optstop.status_name(OptStalled("line search")))   // stalled: line search
+// ```
+pub fn status_name(status: OptStatus) -> Str
+    todo("optimize-nv.optstop.status_name")
+
+// Whether a report's status is `OptConverged`.
+//
+// The one-line check a caller writes when it only wants to know
+// whether to trust the point.  It is a function rather than a field
+// so that the three arms stay one thing to match on.
+//
+// ```novo
+// use optstop
+//
+// fn main() [io]
+//     let r = OptReport { point: [1.0], value: 0.0, status: OptConverged, iterations: 3, evaluations: 9, gradient_evaluations: 0 }
+//     println("${optstop.converged(r)}")   // true
+// ```
+pub fn converged(report: OptReport) -> Bool
+    todo("optimize-nv.optstop.converged")

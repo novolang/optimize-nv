@@ -1,0 +1,45 @@
+[package]
+name        = "optimize-nv"
+version     = "0.0.1"
+description = "Local minimisation of a caller-supplied function: Nelder-Mead, BFGS with an analytic or a numeric gradient, Brent and golden-section in one dimension, and Levenberg-Marquardt least squares — each a pure iteration under one stopping-rule value, answering a report that says whether it converged, ran out of budget or stalled."
+license     = "Apache-2.0"
+
+# An INTERFACE release: every `pub fn` body is a `todo()`, so the
+# signatures and the effect rows are published and nothing is
+# implemented.  `novo pkg publish` recognises the shape and requires
+# both the draft stability and the 0.0.x version; the first
+# implementation is the 0.1.0 published over it.
+stability   = "draft"
+
+# `core`.  The objective arrives as a function VALUE and every
+# evaluation is a call to it, so nothing here reads a clock, draws a
+# random number or writes a trace.  Two things follow.  A run is
+# reproducible to the last evaluation, which is why the tests can
+# assert an evaluation count.  And the initial simplex is an argument
+# rather than a random perturbation of the starting point — the way
+# every other implementation builds it, and the one thing that would
+# have put this package in `host`.  The whole surface is `[]`.
+layer       = "core"
+
+category    = "science"
+
+tags        = ["optimization", "minimization", "nelder-mead", "bfgs", "levenberg-marquardt", "least-squares", "science"]
+repository  = "https://github.com/novolang/optimize-nv"
+maintainers = ["novo-lang"]
+novo        = ">= 0.9.0"
+
+# A library: no `main`, so `novo pkg build` type-checks and
+# effect-checks every module under `src/` and writes no binary.
+
+[docs.pages]
+"README.md" = "Local minimisation with a typed stopping rule and a typed result"
+
+[dependencies]
+# None.  Every method here works on `[Float]` and `[[Float]]` the
+# caller already holds, and the only linear algebra any of them needs
+# — the BFGS inverse-Hessian update and the damped normal equations
+# Levenberg-Marquardt solves — is small, dense and written against
+# those lists.  Taking `ndarray-nv` for it would put a dependency in
+# the closure of every consumer to save two dozen lines, and would tie
+# this package's calling convention to another interface's shape
+# before either has an implementation.

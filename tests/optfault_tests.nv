@@ -1,0 +1,45 @@
+// optfault_tests.nv — a refusal names the call, not the function.
+//
+// RED ON PURPOSE: every assertion reaches `not implemented:
+// optimize-nv.OptFault.message`.  What is asserted is the one rule the
+// `Error` implementation has to follow: the message says what about
+// the CALL was wrong and carries the numbers that make it wrong, so
+// the reader does not have to guess which of four arguments was the
+// bad one.
+
+use std.test
+
+@test
+fn test_a_fault_carries_the_numbers_that_produced_it() [io]
+    test.case("a simplex of the wrong size says what was given and what was needed")
+    let s = OptBadSimplex(2, 3)
+    test.assert(str.contains(s.message(), "2"))
+    test.assert(str.contains(s.message(), "3"))
+
+    test.case("a bracket that does not bracket carries the interval")
+    let b = OptBadBracket(5.0, 0.0)
+    test.assert(str.contains(b.message(), "5"))
+
+    test.case("a bad setting names the field")
+    test.assert(str.contains(OptBadSetting("value_tolerance", -1.0).message(), "value_tolerance"))
+
+    test.case("an unreachable stopping rule names what to set")
+    test.assert(str.contains(OptStopUnreachable("max_iterations").message(), "max_iterations"))
+
+@test
+fn test_the_two_length_faults_carry_both_lengths() [io]
+    // Each of these is a wrong answer rather than an error in a
+    // library that does not check it, which is why they are faults.
+    test.case("a residual vector that changed length")
+    let r = OptResidualLengthChanged(2, 1)
+    test.assert(str.contains(r.message(), "2"))
+    test.assert(str.contains(r.message(), "1"))
+
+    test.case("a gradient of the wrong length against the point it was taken at")
+    let g = OptGradientLengthWrong(2, 1)
+    test.assert(str.contains(g.message(), "2"))
+
+@test
+fn test_an_empty_start_has_its_own_arm() [io]
+    test.case("no coordinates, nothing to vary")
+    test.assert(str.len(OptEmptyStart.message()) > 0)

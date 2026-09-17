@@ -1,0 +1,120 @@
+// optleast_tests.nv — least squares, where the residuals are the
+// argument and the sum is the answer.
+//
+// RED ON PURPOSE: every assertion reaches `not implemented:
+// optimize-nv.optleast.<fn>`.
+//
+// The oracle is the one fit whose answer is arithmetic: the constant
+// model fitted to the observations 1, 2 and 3 has its least-squares
+// solution at their mean, 2, with a residual sum of squares of 2.
+// Beside it is a straight line through three collinear points, whose
+// residuals are exactly zero.
+
+use std.test
+use optleast
+use optstop
+
+fn constant_residuals(p: [Float]) -> [Float]
+    [p[0] - 1.0, p[0] - 2.0, p[0] - 3.0]
+
+fn constant_jacobian(p: [Float]) -> [[Float]]
+    [[1.0], [1.0], [1.0]]
+
+fn line_residuals(p: [Float]) -> [Float]
+    // y = 2x + 1 at x = 0, 1, 2, so the exact fit is p = (2, 1).
+    [p[0] * 0.0 + p[1] - 1.0, p[0] * 1.0 + p[1] - 3.0, p[0] * 2.0 + p[1] - 5.0]
+
+fn ragged_residuals(p: [Float]) -> [Float]
+    if p[0] > 0.5
+        [p[0], p[0]]
+    else
+        [p[0]]
+
+@test
+fn test_the_classic_damping_schedule() [io]
+    test.case("start small, grow on a rejected step, shrink on an accepted one")
+    let d = optleast.classic_damping()
+    test.assert(d.start == 0.001)
+    test.assert(d.grow == 10.0)
+    test.assert(d.shrink == 10.0)
+    test.assert(d.ceiling > d.start)
+
+@test
+fn test_the_constant_model_fits_to_the_mean() [io]
+    // The one fit whose answer is arithmetic.
+    let rule = optstop.with_value_tolerance(optstop.budgeted(100), 0.000000001)
+    let how = optstop.central_difference(0.000001)
+
+    test.case("the parameter is the mean of the observations")
+    match optleast.levenberg_marquardt(constant_residuals, [0.0], how, optleast.classic_damping(), rule)
+        Err(e) => test.fail(e.message())
+        Ok(r)  => test.assert_approx(r.point[0], 2.0, 0.000001)
+
+    test.case("and the report's value is the SUM OF SQUARES, which is 2")
+    match optleast.levenberg_marquardt(constant_residuals, [0.0], how, optleast.classic_damping(), rule)
+        Err(e) => test.fail(e.message())
+        Ok(r)  => test.assert_approx(r.value, 2.0, 0.000001)
+
+@test
+fn test_an_exact_fit_drives_the_residuals_to_zero() [io]
+    let rule = optstop.with_value_tolerance(optstop.budgeted(200), 0.0000000001)
+    let how = optstop.central_difference(0.000001)
+
+    test.case("three collinear points, so the line goes through all of them")
+    match optleast.levenberg_marquardt(line_residuals, [0.0, 0.0], how, optleast.classic_damping(), rule)
+        Err(e) => test.fail(e.message())
+        Ok(r)  =>
+            test.assert_approx(r.point[0], 2.0, 0.0001)
+            test.assert_approx(r.point[1], 1.0, 0.0001)
+            test.assert_approx(r.value, 0.0, 0.000001)
+            test.assert(optstop.converged(r))
+
+@test
+fn test_an_analytic_jacobian_costs_one_evaluation_per_iteration() [io]
+    // The difference between a fit that costs parameters + 1
+    // evaluations an iteration and one that costs one, which on an
+    // expensive model is the whole cost of the fit.
+    let rule = optstop.with_value_tolerance(optstop.budgeted(100), 0.000000001)
+
+    test.case("the same answer as the differenced form")
+    match optleast.levenberg_marquardt_jacobian(constant_residuals, constant_jacobian, [0.0], optleast.classic_damping(), rule)
+        Err(e) => test.fail(e.message())
+        Ok(r)  =>
+            test.assert_approx(r.point[0], 2.0, 0.000001)
+            test.assert(r.evaluations <= r.iterations + 2)
+
+@test
+fn test_a_residual_function_that_changes_length_is_not_one_problem() [io]
+    // Without this check the failure is a silently wrong fit rather
+    // than an error, which is why both lengths are carried.
+    let rule = optstop.budgeted(50)
+    test.case("two residuals at one point and one at another")
+    match optleast.levenberg_marquardt(ragged_residuals, [1.0], optstop.central_difference(0.1), optleast.classic_damping(), rule)
+        Ok(_)  => test.fail("a residual vector whose length depends on the parameters is not one problem")
+        Err(_) => test.assert(true)
+
+@test
+fn test_sum_of_squares_is_the_objective_written_out() [io]
+    test.case("3 and 4 make 25")
+    test.assert_approx(optleast.sum_of_squares([3.0, 4.0]), 25.0, 0.0000001)
+
+    test.case("an empty residual vector sums to nothing")
+    test.assert_approx(optleast.sum_of_squares([]), 0.0, 0.0000001)
+
+    test.case("and the sign of a residual does not survive the squaring")
+    test.assert_approx(optleast.sum_of_squares([-2.0]), 4.0, 0.0000001)
+
+@test
+fn test_the_numeric_jacobian_is_one_row_per_residual() [io]
+    test.case("two residuals and one parameter is a two-by-one matrix of ones")
+    match optleast.numeric_jacobian(constant_residuals, [0.0], optstop.central_difference(0.000001))
+        Err(e) => test.fail(e.message())
+        Ok(j)  =>
+            test.assert(list.len(j) == 3)
+            test.assert(list.len(j[0]) == 1)
+            test.assert_approx(j[0][0], 1.0, 0.00001)
+
+    test.case("and it matches the analytic one, which is the check it exists for")
+    match optleast.numeric_jacobian(constant_residuals, [0.0], optstop.central_difference(0.000001))
+        Err(e) => test.fail(e.message())
+        Ok(j)  => test.assert_approx(j[2][0], constant_jacobian([0.0])[2][0], 0.00001)

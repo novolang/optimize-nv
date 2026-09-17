@@ -1,0 +1,129 @@
+// optscalar.nv — one variable, where the answer is a bracket that
+// shrinks.
+//
+// WHAT A BRACKET IS.  Three points `a < b < c` with `f(b)` below both
+// `f(a)` and `f(c)`.  A continuous function that does that has a
+// minimum somewhere between `a` and `c`, and every method here works
+// by shrinking the bracket while keeping that property.  So the
+// bracket is the argument, not a starting point: a one-dimensional
+// minimisation that begins from a single number has to go looking for
+// one first, and `bracket_from` is that search, written separately so
+// that a caller who already knows the interval does not pay for it.
+//
+// THE TWO METHODS, AND WHEN EACH IS RIGHT.  Golden-section shrinks the
+// bracket by a constant factor — about 0.618 — every step, whatever
+// the function looks like.  It is slow and it cannot be fooled.
+// Brent's method fits a parabola through three points and jumps to
+// its minimum when that is inside the bracket and is an improvement,
+// and falls back to a golden-section step when it is not.  On a smooth
+// function it is much faster; on a function with a kink it degrades
+// to golden-section rather than failing, which is the property that
+// makes it the default.
+//
+// Use golden-section when the function is noisy, expensive and
+// evaluated in a loop whose cost must be predictable, or when a test
+// needs a known number of evaluations.  Use Brent otherwise.
+//
+// THE OBJECTIVE IS A FUNCTION VALUE.  `f: fn(Float) -> Float`,
+// evaluated by these functions and by nothing else.  No clock is read,
+// no trace is printed and no random number is drawn, which is what
+// keeps this package `core` — and which also means a run is
+// reproducible to the last evaluation, so a test can assert the
+// evaluation count.
+
+// The minimum of `f` on the bracket `[lower, upper]` by Brent's
+// method.
+//
+// `OptBadBracket` when `lower` is not below `upper`.  The point in the
+// report is a `[Float]` of one element, so that a caller can treat a
+// one-dimensional and a many-dimensional report the same way.
+//
+// ```novo
+// use optscalar
+// use optstop
+//
+// fn quadratic(x: Float) -> Float
+//     (x - 2.0) * (x - 2.0)
+//
+// fn main() [io]
+//     let rule = optstop.with_point_tolerance(optstop.budgeted(100), 0.00000001)
+//     match optscalar.brent(quadratic, 0.0, 5.0, rule)
+//         Ok(r)  => println("${r.point[0]}")   // 2
+//         Err(e) => println(e.message())
+// ```
+pub fn brent(f: fn(Float) -> Float, lower: Float, upper: Float,
+             rule: OptStop) -> Result<OptReport, OptFault>
+    todo("optimize-nv.optscalar.brent")
+
+// The minimum of `f` on the bracket `[lower, upper]` by golden-section
+// search.
+//
+// The bracket shrinks by the golden ratio every step whatever the
+// function does, so the evaluation count is a function of the
+// tolerance alone and a test can assert it.
+//
+// ```novo
+// use optscalar
+// use optstop
+//
+// fn quadratic(x: Float) -> Float
+//     (x - 2.0) * (x - 2.0)
+//
+// fn main() [io]
+//     let rule = optstop.with_point_tolerance(optstop.budgeted(200), 0.000001)
+//     match optscalar.golden_section(quadratic, 0.0, 5.0, rule)
+//         Ok(r)  => println(optstop.status_name(r.status))   // converged
+//         Err(e) => println(e.message())
+// ```
+pub fn golden_section(f: fn(Float) -> Float, lower: Float, upper: Float,
+                      rule: OptStop) -> Result<OptReport, OptFault>
+    todo("optimize-nv.optscalar.golden_section")
+
+// A bracket around a minimum, found by walking downhill from two
+// starting points.
+//
+// Answers the three points `a`, `b`, `c` with `f(b)` below both ends,
+// which is what `brent` and `golden_section` want.  `OptBadBracket`
+// when the walk leaves the evaluation budget without finding one,
+// which is what happens on a function with no minimum in that
+// direction.
+//
+// It is a separate function rather than something the methods do for
+// themselves because the search costs evaluations a caller who already
+// knows the interval should not pay, and because when it fails the
+// useful message is about the bracket search rather than about the
+// minimisation.
+//
+// ```novo
+// use optscalar
+// use optstop
+//
+// fn quadratic(x: Float) -> Float
+//     (x - 2.0) * (x - 2.0)
+//
+// fn main() [io]
+//     match optscalar.bracket_from(quadratic, 0.0, 1.0, optstop.budgeted(50))
+//         Ok(b)  => println("${b[0]} ${b[2]}")
+//         Err(e) => println(e.message())
+// ```
+pub fn bracket_from(f: fn(Float) -> Float, first: Float, second: Float,
+                    rule: OptStop) -> Result<[Float], OptFault>
+    todo("optimize-nv.optscalar.bracket_from")
+
+// Whether these three points bracket a minimum of `f`.
+//
+// The predicate the two methods assume and `bracket_from` produces,
+// written out so that a caller building a bracket by hand can check it
+// and so that the rule is stated once.
+//
+// ```novo
+// use optscalar
+//
+// fn quadratic(x: Float) -> Float
+//     (x - 2.0) * (x - 2.0)
+//
+// fn main() [io]
+//     println("${optscalar.is_bracket(quadratic, 0.0, 2.0, 5.0)}")   // true
+// ```
+pub fn is_bracket(f: fn(Float) -> Float, lower: Float, middle: Float, upper: Float) -> Bool
+    todo("optimize-nv.optscalar.is_bracket")

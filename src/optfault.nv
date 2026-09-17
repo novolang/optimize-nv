@@ -1,0 +1,65 @@
+// optfault.nv — the six ways a minimisation is refused before it
+// starts, and why none of them is "it did not converge".
+//
+// NOT CONVERGING IS NOT A FAILURE.  An iteration that runs out of
+// budget has produced a point, a function value and a count, and a
+// caller can use all three — to restart from there, to report progress,
+// to decide the model is good enough.  Throwing that away and
+// returning an error loses the work.  So the outcome of a run is an
+// `OptReport` with a status on it, and the status has an arm for the
+// budget and an arm for a stall.  `optstop.nv`'s module comment is
+// where that is argued.
+//
+// WHAT IS LEFT FOR THIS ENUM is the set of calls that describe no
+// minimisation at all: a starting point with no coordinates, a
+// bracket that does not bracket, a stopping rule that could never
+// stop, a simplex of the wrong size.  Every one of them is a mistake
+// in the CALL rather than a fact about the function, and every one of
+// them is worth finding before the first evaluation rather than after
+// the thousandth.
+
+// Why a minimisation could not be attempted.
+//
+// ```novo
+// use optfault
+//
+// fn main() [io]
+//     let e = OptEmptyStart
+//     println(e.message())
+// ```
+pub enum OptFault
+    // The starting point has no coordinates, so there is nothing to
+    // vary.
+    OptEmptyStart
+    // The initial simplex does not have `n + 1` vertices for an
+    // `n`-dimensional problem, or two of its vertices are the same
+    // point.  Carries what was given and what was needed.
+    OptBadSimplex(given: Int, needed: Int)
+    // The bracket handed to a one-dimensional method does not bracket
+    // a minimum: `lower` is not below `upper`, or the function at the
+    // interior point is not below both ends.  Carries the interval.
+    OptBadBracket(lower: Float, upper: Float)
+    // The stopping rule could never stop: every tolerance is zero and
+    // no budget is set, so the iteration would run for ever.  `field`
+    // names what to set.
+    OptStopUnreachable(field: Str)
+    // A tolerance or a step is negative, or a budget is not positive.
+    // `field` names it and `value` carries what was given.
+    OptBadSetting(field: Str, value: Float)
+    // The residual function answered a vector of a different length
+    // than it did the first time, so the least-squares problem is not
+    // one problem.  Carries both lengths.
+    OptResidualLengthChanged(first: Int, later: Int)
+    // A gradient the caller supplied has a different length than the
+    // point it was taken at.  Carries both.
+    OptGradientLengthWrong(point: Int, gradient: Int)
+
+// `OptFault` is an `Error`, which is what lets `Result<T, OptFault>`
+// exist at all (SPEC § 3.4).
+impl Error for OptFault
+    // The one-line message: what about the call was wrong, and the
+    // numbers that make it wrong.
+    //
+    // Panics with `not implemented` until the bodies land.
+    fn message(self) -> Str
+        todo("optimize-nv.OptFault.message")

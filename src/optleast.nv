@@ -1,0 +1,182 @@
+// optleast.nv — least squares, where the problem's shape is known and
+// the method uses it.
+//
+// WHAT A LEAST-SQUARES PROBLEM IS.  A model with parameters, a set of
+// observations, and a RESIDUAL for each observation: what the model
+// predicts minus what was measured.  The objective is the sum of the
+// squares of the residuals, and the thing to minimise is that sum.
+//
+// A general minimiser can be handed that sum and will work.  It will
+// also be throwing away the fact that makes the problem easy: the
+// second derivatives of a sum of squares are approximately the product
+// of the first derivatives of the residuals with themselves — the
+// Gauss-Newton approximation — so the curvature can be had from the
+// Jacobian alone, with no second derivatives and no quasi-Newton
+// history.  That is why a dedicated method converges in tens of
+// iterations where Nelder-Mead takes thousands, and it is why the
+// residual function rather than the sum is what this module takes.
+//
+// SO THE OBJECTIVE HERE IS `fn([Float]) -> [Float]`.  Parameters in,
+// one residual per observation out.  The package squares and sums
+// them; a caller that hands over the sum instead is using the wrong
+// module, and the type says so.
+//
+// WHAT LEVENBERG-MARQUARDT ADDS.  Gauss-Newton takes the full step to
+// the minimum of the quadratic approximation, which is excellent near
+// a solution and wild far from one.  Levenberg-Marquardt adds a
+// DAMPING parameter that interpolates between that step and a small
+// step down the gradient: large damping is gradient descent with a
+// short step, zero damping is Gauss-Newton.  The damping is increased
+// when a step makes things worse and decreased when it helps, so the
+// method is trust-region behaviour without a trust region.  Its
+// starting value and its two multipliers are the caller's, for the
+// same reason every other constant in this package is.
+//
+// A run that ends because the damping grew past its ceiling is
+// `OptStalled("damping")`, and on a well-posed problem it means the
+// residuals are not differentiable where the iteration went.
+
+// The damping schedule.
+//
+// `classic_damping` is the usual one: start at 0.001, multiply by 10
+// on a rejected step, divide by 10 on an accepted one, and give up
+// above 1e9.
+//
+// ```novo
+// use optleast
+//
+// fn main() [io]
+//     println("${optleast.classic_damping().start}")   // 0.001
+// ```
+pub struct OptDamping
+    // The damping the first step is taken with.
+    start: Float
+    // What the damping is multiplied by when a step increased the sum
+    // of squares and was rejected.
+    grow: Float
+    // What it is divided by when a step decreased the sum and was
+    // accepted.
+    shrink: Float
+    // The damping above which the run stops as `OptStalled`.  Without
+    // it a stuck iteration takes the whole budget making steps of
+    // nothing.
+    ceiling: Float
+
+// The usual damping schedule: 0.001, times 10, divided by 10, ceiling
+// 1e9.
+//
+// ```novo
+// use optleast
+//
+// fn main() [io]
+//     println("${optleast.classic_damping().grow}")   // 10
+// ```
+pub fn classic_damping() -> OptDamping
+    todo("optimize-nv.optleast.classic_damping")
+
+// The parameters that minimise the sum of the squares of `residuals`,
+// by Levenberg-Marquardt.
+//
+// `residuals` answers one number per observation, and must answer the
+// same number of them at every point — `OptResidualLengthChanged`
+// carries both lengths when it does not, because a residual function
+// whose length depends on its parameters is not one problem and the
+// failure is otherwise a silently wrong fit.
+//
+// The Jacobian is differenced numerically with the step `how`
+// carries.  `levenberg_marquardt_jacobian` is the form that takes an
+// analytic one.
+//
+// The report's `value` is the sum of the squares at the best
+// parameters, not the root mean square and not the residual vector.
+//
+// ```novo
+// use optleast
+// use optstop
+//
+// fn residuals(p: [Float]) -> [Float]
+//     // Fitting the constant model p[0] to three observations.
+//     [p[0] - 1.0, p[0] - 2.0, p[0] - 3.0]
+//
+// fn main() [io]
+//     let rule = optstop.with_value_tolerance(optstop.budgeted(100), 0.000000001)
+//     let how = optstop.central_difference(0.000001)
+//     match optleast.levenberg_marquardt(residuals, [0.0], how, optleast.classic_damping(), rule)
+//         Ok(r)  => println("${r.point[0]}")   // 2, the mean
+//         Err(e) => println(e.message())
+// ```
+pub fn levenberg_marquardt(residuals: fn([Float]) -> [Float], start: [Float], how: OptGradient,
+                           damping: OptDamping, rule: OptStop) -> Result<OptReport, OptFault>
+    todo("optimize-nv.optleast.levenberg_marquardt")
+
+// The same fit with a Jacobian the caller supplies.
+//
+// `jacobian` answers one row per residual, each row one entry per
+// parameter — the derivative of that residual with respect to that
+// parameter.  `OptGradientLengthWrong` when a row's length does not
+// match the parameter count.
+//
+// An analytic Jacobian is the difference between a fit that takes
+// `parameters + 1` evaluations per iteration and one that takes one,
+// which on an expensive model is the whole cost of the fit.
+//
+// ```novo
+// use optleast
+// use optstop
+//
+// fn residuals(p: [Float]) -> [Float]
+//     [p[0] - 1.0, p[0] - 2.0, p[0] - 3.0]
+//
+// fn jacobian(p: [Float]) -> [[Float]]
+//     [[1.0], [1.0], [1.0]]
+//
+// fn main() [io]
+//     let rule = optstop.with_value_tolerance(optstop.budgeted(100), 0.000000001)
+//     match optleast.levenberg_marquardt_jacobian(residuals, jacobian, [0.0], optleast.classic_damping(), rule)
+//         Ok(r)  => println("${r.point[0]}")   // 2
+//         Err(e) => println(e.message())
+// ```
+pub fn levenberg_marquardt_jacobian(residuals: fn([Float]) -> [Float],
+                                    jacobian: fn([Float]) -> [[Float]], start: [Float],
+                                    damping: OptDamping,
+                                    rule: OptStop) -> Result<OptReport, OptFault>
+    todo("optimize-nv.optleast.levenberg_marquardt_jacobian")
+
+// The sum of the squares of a residual vector.
+//
+// The objective the fit minimises, written out so that a caller can
+// compute it at a point of its own — to compare two models, to report
+// a goodness of fit, or to check what the report says.
+//
+// ```novo
+// use optleast
+//
+// fn main() [io]
+//     println("${optleast.sum_of_squares([3.0, 4.0])}")   // 25
+// ```
+pub fn sum_of_squares(residuals: [Float]) -> Float
+    todo("optimize-nv.optleast.sum_of_squares")
+
+// The Jacobian of a residual function at one point, differenced
+// numerically.
+//
+// The matrix the fit builds internally, exposed for the same reason
+// `optquasi.numeric_gradient` is: checking an analytic Jacobian
+// against a differenced one at a few points is how a wrong derivative
+// gets found.
+//
+// ```novo
+// use optleast
+// use optstop
+//
+// fn residuals(p: [Float]) -> [Float]
+//     [p[0] - 1.0, p[0] - 2.0]
+//
+// fn main() [io]
+//     match optleast.numeric_jacobian(residuals, [0.0], optstop.central_difference(0.000001))
+//         Ok(j)  => println("${list.len(j)}")   // 2
+//         Err(e) => println(e.message())
+// ```
+pub fn numeric_jacobian(residuals: fn([Float]) -> [Float], point: [Float],
+                        how: OptGradient) -> Result<[[Float]], OptFault>
+    todo("optimize-nv.optleast.numeric_jacobian")

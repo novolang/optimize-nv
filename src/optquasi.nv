@@ -1,0 +1,174 @@
+// optquasi.nv — BFGS: the method that learns the curvature it is not
+// told.
+//
+// WHAT IT DOES.  Newton's method steps to the minimum of the quadratic
+// that matches the objective's value, gradient and second derivatives
+// at the current point.  It converges very fast and it needs the
+// matrix of second derivatives, which almost nobody has.  A
+// quasi-Newton method builds an APPROXIMATION to that matrix's inverse
+// out of the gradients it has already seen: each step's change in
+// position and change in gradient is one more piece of information
+// about the curvature, and the BFGS update is the rule that folds it
+// in.  After `n` steps on a quadratic it is exact.
+//
+// So BFGS needs the gradient, and that is the argument this module is
+// shaped around.
+//
+// THE GRADIENT IS EITHER GIVEN OR DIFFERENCED, AND THE CHOICE IS A
+// VALUE.  `bfgs` takes the objective, a gradient function and an
+// `OptGradient` describing how to get the gradient.  When the
+// `OptGradient` says numeric, the gradient function is not called and
+// the differences are taken over the objective with the step that
+// value carries.  A caller reading the call site can see which of the
+// two is happening and, in the numeric case, over what step — which is
+// the number that decides whether a numeric gradient is useful or
+// noise, and which a library that chooses it silently never shows
+// anyone.
+//
+// `bfgs_numeric` is the convenience for the common case, and it takes
+// the `OptGradient` too rather than choosing a step: there is no step
+// that is right for every problem's units, and a default one is a
+// number that works until it does not.
+//
+// THE LINE SEARCH.  Each iteration picks a direction from the
+// approximate inverse and then finds a step along it that decreases
+// the objective enough — the Armijo condition — and flattens the
+// gradient enough — the curvature condition.  Together they are the
+// Wolfe conditions, and their two constants are the caller's here for
+// the same reason the simplex's coefficients are.  A line search that
+// cannot find such a step is `OptStalled("line search")`, which on a
+// smooth function means the gradient is wrong: a numeric gradient
+// whose step is too small for the objective's noise is the usual
+// cause, and that is why the step is visible.
+
+// The two constants of the Wolfe conditions.
+//
+// `classic_line_search` is the usual pair: 0.0001 for the sufficient
+// decrease and 0.9 for the curvature.
+//
+// ```novo
+// use optquasi
+//
+// fn main() [io]
+//     println("${optquasi.classic_line_search().curvature}")   // 0.9
+// ```
+pub struct OptLineSearch
+    // The Armijo constant: how much of the decrease the linear model
+    // predicts a step must actually deliver.  Small — 0.0001 — because
+    // it is a floor, not a target.
+    decrease: Float
+    // The curvature constant: how much flatter the gradient along the
+    // direction must be after the step.  0.9 for BFGS, because a
+    // quasi-Newton direction wants a long step.
+    curvature: Float
+    // The largest number of step lengths to try before the search
+    // gives up and the run is `OptStalled`.
+    max_steps: Int
+
+// The usual Wolfe constants: 0.0001, 0.9, and twenty trial steps.
+//
+// ```novo
+// use optquasi
+//
+// fn main() [io]
+//     println("${optquasi.classic_line_search().decrease}")   // 0.0001
+// ```
+pub fn classic_line_search() -> OptLineSearch
+    todo("optimize-nv.optquasi.classic_line_search")
+
+// The minimum of `f` from `start`, by BFGS.
+//
+// `gradient` is called when `how` says the gradient is analytic, and
+// ignored when `how` says it is numeric — in which case the
+// differences are taken over `f` with the step `how` carries.
+// `OptGradientLengthWrong` when a supplied gradient's length does not
+// match the point's.
+//
+// The report's `gradient_evaluations` counts the gradient calls, and
+// a numeric gradient's extra objective calls are counted there too
+// rather than in `evaluations`, so the two costs can be told apart.
+//
+// ```novo
+// use optquasi
+// use optstop
+//
+// fn sphere(x: [Float]) -> Float
+//     x[0] * x[0] + x[1] * x[1]
+//
+// fn sphere_grad(x: [Float]) -> [Float]
+//     [2.0 * x[0], 2.0 * x[1]]
+//
+// fn main() [io]
+//     let rule = optstop.with_gradient_tolerance(optstop.budgeted(200), 0.000001)
+//     let how = optstop.analytic_gradient()
+//     match optquasi.bfgs(sphere, sphere_grad, [1.0, 1.0], how, optquasi.classic_line_search(), rule)
+//         Ok(r)  => println("${r.value}")   // 0
+//         Err(e) => println(e.message())
+// ```
+pub fn bfgs(f: fn([Float]) -> Float, gradient: fn([Float]) -> [Float], start: [Float],
+            how: OptGradient, search: OptLineSearch, rule: OptStop) -> Result<OptReport, OptFault>
+    todo("optimize-nv.optquasi.bfgs")
+
+// BFGS with no gradient function at all: the differences are taken
+// over `f`.
+//
+// The convenience for an objective with no derivative to hand.  It
+// still takes the `OptGradient`, because the step it differences over
+// is the number that decides whether the result is a gradient or
+// noise, and no library can choose it for somebody else's units.
+//
+// ```novo
+// use optquasi
+// use optstop
+//
+// fn sphere(x: [Float]) -> Float
+//     x[0] * x[0] + x[1] * x[1]
+//
+// fn main() [io]
+//     let rule = optstop.with_value_tolerance(optstop.budgeted(200), 0.000000001)
+//     match optquasi.bfgs_numeric(sphere, [1.0, 1.0], optstop.central_difference(0.000001), rule)
+//         Ok(r)  => println("${r.value}")   // 0
+//         Err(e) => println(e.message())
+// ```
+pub fn bfgs_numeric(f: fn([Float]) -> Float, start: [Float], how: OptGradient,
+                    rule: OptStop) -> Result<OptReport, OptFault>
+    todo("optimize-nv.optquasi.bfgs_numeric")
+
+// The numeric gradient of `f` at one point, on its own.
+//
+// The differencing `bfgs` does internally, exposed because it is worth
+// having by itself: a caller checking an analytic gradient against a
+// numeric one at a few points is how a wrong derivative gets found,
+// and that check is worth more than most unit tests of an objective.
+//
+// ```novo
+// use optquasi
+// use optstop
+//
+// fn sphere(x: [Float]) -> Float
+//     x[0] * x[0] + x[1] * x[1]
+//
+// fn main() [io]
+//     match optquasi.numeric_gradient(sphere, [1.0, 2.0], optstop.central_difference(0.000001))
+//         Ok(g)  => println("${g[0]}")   // about 2
+//         Err(e) => println(e.message())
+// ```
+pub fn numeric_gradient(f: fn([Float]) -> Float, point: [Float],
+                        how: OptGradient) -> Result<[Float], OptFault>
+    todo("optimize-nv.optquasi.numeric_gradient")
+
+// The largest absolute component of a gradient.
+//
+// The quantity `gradient_tolerance` is tested against — the infinity
+// norm, not the Euclidean one, because a tolerance on the largest
+// component is a statement about each coordinate and does not get
+// looser as the dimension grows.
+//
+// ```novo
+// use optquasi
+//
+// fn main() [io]
+//     println("${optquasi.gradient_norm([0.3, -0.7, 0.1])}")   // 0.7
+// ```
+pub fn gradient_norm(gradient: [Float]) -> Float
+    todo("optimize-nv.optquasi.gradient_norm")
